@@ -75,12 +75,15 @@ class FINER:
                 display_name = f"{display_name}_{self.train_params['model_name']}".replace('/', '-')
             elif Configuration['task']['model'] == 'bilstm':
                 display_name = f"{display_name}_bilstm_{self.train_params['embeddings']}"
-            wandb.init(
-                entity=self.general_params['wandb_entity'],
-                project=self.general_params['wandb_project'],
-                id=Configuration['task']['log_name'],
-                name=display_name
-            )
+            if self.general_params['wandb_entity'] is None and self.general_params['wandb_project'] is None:
+                wandb.init(mode='disabled')
+            else:
+                wandb.init(
+                    entity=self.general_params['wandb_entity'],
+                    project=self.general_params['wandb_project'],
+                    id=Configuration['task']['log_name'],
+                    name=display_name
+                )
 
         shape_special_tokens_path = os.path.join(DATA_DIR, 'shape_special_tokens.txt')
         with open(shape_special_tokens_path) as fin:

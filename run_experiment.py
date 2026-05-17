@@ -1,6 +1,10 @@
 import click
 import os
+import random
 import logging
+
+import numpy as np
+import tensorflow as tf
 
 from configurations.configuration import Configuration
 from finer import FINER
@@ -15,16 +19,28 @@ os.environ['TOKENIZERS_PARALLELISM'] = 'true'
 cli = click.Group()
 
 
+def set_seed(seed):
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+    tf.random.set_seed(seed)
+
+
 @cli.command()
 @click.option('--method', default='transformer')
 @click.option('--mode', default='train')
-def run_experiment(method, mode):
+@click.option('--seed', default=42, type=int, help='Random seed for reproducibility')
+def run_experiment(method, mode, seed):
     """
     Main function that instantiates and runs a new experiment
 
     :param method: Method to run ("bilstm", "transformer", "transformer_bilstm")
     :param mode: Mode to run ("train", "evaluate")
+    :param seed: Random seed for reproducibility
     """
+
+    set_seed(seed)
+    LOGGER.info(f'Random seed set to {seed}')
 
     # Instantiate the Configuration class
     Configuration.configure(method=method, mode=mode)
