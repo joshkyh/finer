@@ -1,0 +1,46 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+type: command
+
+display_name: finer-secbertshape-seed42
+experiment_name: finer-repro
+description: |
+  Phase 3 reproduction for PubKeywordExtract#5: fine-tune
+  nlpaueb/sec-bert-shape on FiNER-139 train (900K sentences), evaluate
+  on the 108K-sentence test split. Target: entity-level micro-F1 ≥ 81.0
+  (within 3σ of the published 82.1 ± 0.1 in Loukas 2022 Table 4).
+
+  Seed 42. Single-seed first to validate before a 3-seed sweep.
+
+code: ../
+
+inputs:
+  hf_sec_bert_shape:
+    type: uri_folder
+    path: azureml:hf-sec-bert-shape:1
+    mode: ro_mount
+  hf_finer_139:
+    type: uri_folder
+    path: azureml:hf-finer-139:1
+    mode: ro_mount
+
+environment: azureml://registries/azureml/environments/tensorflow-2.8-ubuntu20.04-py38-cuda11-gpu/labels/latest
+compute: azureml:train-gpu-v100
+
+environment_variables:
+  HF_HUB_DISABLE_SYMLINKS_WARNING: "1"
+
+# Copy dataset to writable /tmp (datasets==2.1.0 needs to FileLock the
+# zip during extract). Set FINER_MODEL_PATH at the sec-bert-shape
+# snapshot dir; FINER_DATASET_PATH at the script. Swap the headline
+# sec-bert-shape config into transformer.json and run.
+command: >-
+  mkdir -p /tmp/finer-dataset &&
+  cp ${{inputs.hf_finer_139}}/datasets--nlpaueb--finer-139/snapshots/*/finer-139.py /tmp/finer-dataset/ &&
+  cp ${{inputs.hf_finer_139}}/datasets--nlpaueb--finer-139/snapshots/*/finer139.zip /tmp/finer-dataset/ &&
+  export FINER_DATASET_PATH=/tmp/finer-dataset/finer-139.py &&
+  export FINER_MODEL_PATH=$(ls -d ${{inputs.hf_sec_bert_shape}}/snapshots/*/ | head -1) &&
+  echo "FINER_DATASET_PATH=$FINER_DATASET_PATH" &&
+  echo "FINER_MODEL_PATH=$FINER_MODEL_PATH" && ls "$FINER_MODEL_PATH" &&
+  pip install -q -r requirements.txt &&
+  cp configurations/transformer_secbertshape.json configurations/transformer.json &&
+  python run_experiment.py --method transformer --mode train --seed 42
