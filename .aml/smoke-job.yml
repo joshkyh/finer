@@ -1,0 +1,66 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+type: command
+
+display_name: finer-smoke-test
+experiment_name: finer-repro
+description: |
+  Phase 2 smoke for PubKeywordExtract#5: validate the joshkyh/finer fork
+  pipeline runs end-to-end on AML compute with TF 2.8 + CUDA 11.
+
+  Iteration 3: HF assets uploaded as three separate AML data assets
+  (sec-bert-base, sec-bert-shape, finer-139). The command assembles
+  them into an HF cache layout under /tmp/hf-cache/hub/ via symlinks
+  before launching training, so transformers and datasets auto-discover
+  them via HF_HOME.
+
+  Uses debug=true (100 sentences) and epochs=1. Goal: confirm
+    (a) pip install succeeds on the curated TF 2.8 env
+    (b) cached nlpaueb/sec-bert-base resolves from HF_HOME
+    (c) cached nlpaueb/finer-139 resolves from HF_HOME
+    (d) seqeval F1MetricCallback runs end-of-epoch
+    (e) val_macro_f1 is logged
+
+code: ../
+
+# Three pre-uploaded HF data assets, mounted read-only.
+inputs:
+  hf_sec_bert_base:
+    type: uri_folder
+    path: azureml:hf-sec-bert-base:1
+    mode: ro_mount
+  hf_sec_bert_shape:
+    type: uri_folder
+    path: azureml:hf-sec-bert-shape:1
+    mode: ro_mount
+  hf_finer_139:
+    type: uri_folder
+    path: azureml:hf-finer-139:1
+    mode: ro_mount
+
+environment: azureml://registries/azureml/environments/tensorflow-2.8-ubuntu20.04-py38-cuda11-gpu/labels/latest
+compute: azureml:train-gpu-v100
+
+environment_variables:
+  HF_HOME: /tmp/hf-cache
+  TRANSFORMERS_OFFLINE: "1"
+  HF_DATASETS_OFFLINE: "1"
+  HF_HUB_DISABLE_SYMLINKS_WARNING: "1"
+
+# Assemble the HF cache layout from the three mounted inputs, install
+# fork deps, swap in the smoke config, train 1 epoch on 100 sents.
+command: >-
+  mkdir -p /tmp/hf-cache/hub &&
+  ln -s ${{inputs.hf_sec_bert_base}}  /tmp/hf-cache/hub/models--nlpaueb--sec-bert-base &&
+  ln -s ${{inputs.hf_sec_bert_shape}} /tmp/hf-cache/hub/models--nlpaueb--sec-bert-shape &&
+  ln -s ${{inputs.hf_finer_139}}      /tmp/hf-cache/hub/datasets--nlpaueb--finer-139 &&
+  echo "HF cache layout:" && ls -la /tmp/hf-cache/hub &&
+  pip install -q -r requirements.txt &&
+  cp configurations/transformer_smoke.json configurations/transformer.json &&
+  mkdir -p /tmp/finer-dataset &&
+  cp ${{inputs.hf_finer_139}}/datasets--nlpaueb--finer-139/snapshots/*/finer-139.py /tmp/finer-dataset/ &&
+  cp ${{inputs.hf_finer_139}}/datasets--nlpaueb--finer-139/snapshots/*/finer139.zip /tmp/finer-dataset/ &&
+  export FINER_DATASET_PATH=/tmp/finer-dataset/finer-139.py &&
+  export FINER_MODEL_PATH=$(ls -d ${{inputs.hf_sec_bert_base}}/snapshots/*/ | head -1) &&
+  echo "FINER_DATASET_PATH=$FINER_DATASET_PATH" &&
+  echo "FINER_MODEL_PATH=$FINER_MODEL_PATH" && ls "$FINER_MODEL_PATH" &&
+  python run_experiment.py --method transformer --mode train --seed 42

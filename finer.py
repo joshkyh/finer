@@ -24,6 +24,20 @@ from models.callbacks import ReturnBestEarlyStopping, F1MetricCallback
 
 LOGGER = logging.getLogger(__name__)
 
+# Allow overriding the HF dataset identifier with a local path. Useful
+# when running on AML compute clusters that cannot reach HuggingFace
+# Hub (egress-restricted managed VNETs); set FINER_DATASET_PATH to the
+# directory containing finer-139.py + finer139.zip pre-uploaded as an
+# AML data asset.
+_FINER_DATASET = os.environ.get("FINER_DATASET_PATH", "nlpaueb/finer-139")
+
+# Allow overriding the HF model identifier with a local path. transformers==4.18
+# predates the hub/models--*/snapshots cache layout so the hub-style cache from
+# huggingface_hub.snapshot_download is not auto-discovered; setting
+# FINER_MODEL_PATH to the snapshot directory containing config.json /
+# pytorch_model.bin bypasses cache resolution entirely.
+_FINER_MODEL = os.environ.get("FINER_MODEL_PATH")
+
 
 class DataLoader(tf.keras.utils.Sequence):
 
@@ -170,7 +184,7 @@ class FINER:
                 additional_special_tokens.extend(self.shape_special_tokens)
 
             self.tokenizer = AutoTokenizer.from_pretrained(
-                pretrained_model_name_or_path=self.train_params['model_name'],
+                pretrained_model_name_or_path=(_FINER_MODEL or self.train_params['model_name']),
                 additional_special_tokens=additional_special_tokens,
                 use_fast=self.train_params['use_fast_tokenizer']
             )
@@ -178,7 +192,7 @@ class FINER:
     @staticmethod
     def load_dataset_tags():
 
-        dataset = datasets.load_dataset('nlpaueb/finer-139', split='train', streaming=True)
+        dataset = datasets.load_dataset(_FINER_DATASET, split='train', streaming=True)
         dataset_tags = dataset.features['ner_tags'].feature.names
         tag2idx = {tag: int(i) for i, tag in enumerate(dataset_tags)}
         idx2tag = {idx: tag for tag, idx in tag2idx.items()}
@@ -414,7 +428,7 @@ class FINER:
 
         elif Configuration['task']['model'] == 'transformer':
             model = Transformer(
-                model_name=train_params['model_name'],
+                model_name=(_FINER_MODEL or train_params['model_name']),
                 n_classes=self.n_classes,
                 dropout_rate=train_params['dropout_rate'],
                 crf=train_params['crf'],
@@ -423,7 +437,7 @@ class FINER:
             )
         elif Configuration['task']['model'] == 'transformer_bilstm':
             model = TransformerBiLSTM(
-                model_name=train_params['model_name'],
+                model_name=(_FINER_MODEL or train_params['model_name']),
                 n_classes=self.n_classes,
                 dropout_rate=train_params['dropout_rate'],
                 crf=train_params['crf'],
@@ -450,7 +464,7 @@ class FINER:
 
     def train(self):
 
-        train_dataset = datasets.load_dataset(path='nlpaueb/finer-139', split='train')
+        train_dataset = datasets.load_dataset(path=_FINER_DATASET, split='train')
         train_generator = DataLoader(
             dataset=train_dataset,
             vectorize_fn=self.vectorize,
@@ -459,7 +473,7 @@ class FINER:
             shuffle=True
         )
 
-        validation_dataset = datasets.load_dataset(path='nlpaueb/finer-139', split='validation')
+        validation_dataset = datasets.load_dataset(path=_FINER_DATASET, split='validation')
         validation_generator = DataLoader(
             dataset=validation_dataset,
             vectorize_fn=self.vectorize,
@@ -468,7 +482,7 @@ class FINER:
             shuffle=False
         )
 
-        test_dataset = datasets.load_dataset(path='nlpaueb/finer-139', split='test')
+        test_dataset = datasets.load_dataset(path=_FINER_DATASET, split='test')
         test_generator = DataLoader(
             dataset=test_dataset,
             vectorize_fn=self.vectorize,
@@ -696,7 +710,7 @@ class FINER:
         for split in self.eval_params['splits']:
             if split not in ['train', 'validation', 'test']:
                 raise Exception(f'Invalid split selected ({split}). Valid options are "train", "validation", "test"')
-            dataset = datasets.load_dataset(path='nlpaueb/finer-139', split=split)
+            dataset = datasets.load_dataset(path=_FINER_DATASET, split=split)
             generator = DataLoader(
                 dataset=dataset,
                 vectorize_fn=self.vectorize,
